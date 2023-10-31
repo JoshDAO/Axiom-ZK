@@ -29,6 +29,9 @@ contract Marketplace {
     /// @dev mapping from seller address to list of all oToken contracts it has deployed that have not all been closed
     mapping(address => EnumerableSet.AddressSet) private otokensBySeller;
 
+    // @dev mapping of buyer address to list of all oToken contracts it has bought that have not been closed
+    mapping(address => EnumerableSet.AddressSet) private otokensByBuyer;
+
     /// @dev mapping from oTokenAddress to sale info
     mapping(address => OptionSaleInfo) private optionSaleInfo;
 
@@ -107,6 +110,7 @@ contract Marketplace {
         optionSaleInfo[oTokenAddress].price = _price;
         optionSaleInfo[oTokenAddress].currentlyForSale = true;
         optionsForSale.add(oTokenAddress);
+        otokensBySeller[msg.sender].add(oTokenAddress);
     }
 
     function buyOption(address _oTokenAddress, address _seller) external {
@@ -134,10 +138,23 @@ contract Marketplace {
         optionSaleInfo[_oTokenAddress].price = 0;
         optionSaleInfo[_oTokenAddress].currentlyForSale = false;
         optionSaleInfo[_oTokenAddress].numberContractsMatched += 1;
+        otokensByBuyer[msg.sender].add(_oTokenAddress);
     }
 
     function getOptionsForSale() public view returns (address[] memory) {
         return optionsForSale.values();
+    }
+
+    function getOptionsForSaleBySeller(
+        address _seller
+    ) public view returns (address[] memory) {
+        return otokensBySeller[_seller].values();
+    }
+
+    function getOptionsBoughtByBuyer(
+        address _buyer
+    ) public view returns (address[] memory) {
+        return otokensByBuyer[_buyer].values();
     }
 
     // ======== oToken functions =========
@@ -264,7 +281,7 @@ contract Marketplace {
         bool isPut
     )
         internal
-        view
+        pure
         returns (string memory tokenName, string memory tokenSymbol)
     {
         string memory displayStrikePrice = _getDisplayedStrikePrice(
