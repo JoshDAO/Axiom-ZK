@@ -33,7 +33,7 @@ contract Marketplace {
     mapping(address => EnumerableSet.AddressSet) private otokensByBuyer;
 
     /// @dev mapping from oTokenAddress to sale info
-    mapping(address => OptionSaleInfo) private optionSaleInfo;
+    mapping(address => OptionSaleInfo) public optionSaleInfo;
 
     // @dev mapping from token ID to address
     mapping(bytes32 => address) public idToAddress;
