@@ -6,6 +6,8 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {BokkyPooBahsDateTimeLibrary} from "./library/BokkyPooBahsDateTimeLibrary.sol";
 import {Strings} from "./library/Strings.sol";
 
+import "hardhat/console.sol";
+
 /**
  * SPDX-License-Identifier: UNLICENSED
  * @title A contract to allow sellers to mint and sell binary options
@@ -88,7 +90,6 @@ contract Marketplace {
             _isPut,
             msg.sender
         );
-        require(_price > 0 && _price < 1e18, "invalid price");
 
         // this value will be the zero address if does not exist
         oTokenAddress = idToAddress[tokenId];
@@ -250,10 +251,10 @@ contract Marketplace {
             "OtokenFactory: Can't create option with expiry > 2345/12/31"
         );
         // 8 hours = 3600 * 8 = 28800 seconds
-        require(
-            (_expiry - 28800) % (86400) == 0,
-            "OtokenFactory: Option has to expire 08:00 UTC"
-        );
+        // require(
+        //     (_expiry - 28800) % (86400) == 0,
+        //     "OtokenFactory: Option has to expire 08:00 UTC"
+        // );
 
         (
             string memory tokenName,
@@ -415,6 +416,8 @@ contract Marketplace {
     ) internal pure returns (string memory) {
         uint256 remainder = _strikePrice % STRIKE_PRICE_SCALE;
         uint256 quotient = _strikePrice / STRIKE_PRICE_SCALE;
+        console.logUint(remainder);
+        console.logUint(quotient);
         string memory quotientStr = Strings.toString(quotient);
 
         if (remainder == 0) return quotientStr;

@@ -4,33 +4,68 @@
 /* solhint-disable */
 pragma solidity ^0.8.20;
 
+import "hardhat/console.sol";
+
 /**
  * @dev String operations.
  */
 library Strings {
+    function log10(uint256 value) internal pure returns (uint256) {
+        uint256 result = 0;
+        unchecked {
+            if (value >= 10 ** 64) {
+                value /= 10 ** 64;
+                result += 64;
+            }
+            if (value >= 10 ** 32) {
+                value /= 10 ** 32;
+                result += 32;
+            }
+            if (value >= 10 ** 16) {
+                value /= 10 ** 16;
+                result += 16;
+            }
+            if (value >= 10 ** 8) {
+                value /= 10 ** 8;
+                result += 8;
+            }
+            if (value >= 10 ** 4) {
+                value /= 10 ** 4;
+                result += 4;
+            }
+            if (value >= 10 ** 2) {
+                value /= 10 ** 2;
+                result += 2;
+            }
+            if (value >= 10 ** 1) {
+                result += 1;
+            }
+        }
+        return result;
+    }
+
     /**
      * @dev Converts a `uint256` to its ASCII `string` representation.
      */
     function toString(uint256 value) internal pure returns (string memory) {
-        // Inspired by OraclizeAPI's implementation - MIT licence
-        // https://github.com/oraclize/ethereum-api/blob/b42146b063c7d6ee1358846c198246239e9360e8/oraclizeAPI_0.4.25.sol
-
-        if (value == 0) {
-            return "0";
+        unchecked {
+            uint256 length = log10(value) + 1;
+            string memory buffer = new string(length);
+            uint256 ptr;
+            /// @solidity memory-safe-assembly
+            assembly {
+                ptr := add(buffer, add(32, length))
+            }
+            while (true) {
+                ptr--;
+                /// @solidity memory-safe-assembly
+                assembly {
+                    mstore8(ptr, byte(mod(value, 10), "0123456789abcdef"))
+                }
+                value /= 10;
+                if (value == 0) break;
+            }
+            return buffer;
         }
-        uint256 temp = value;
-        uint256 digits;
-        while (temp != 0) {
-            digits++;
-            temp /= 10;
-        }
-        bytes memory buffer = new bytes(digits);
-        uint256 index = digits - 1;
-        temp = value;
-        while (temp != 0) {
-            buffer[index--] = bytes1(uint8(48 + (temp % 10)));
-            temp /= 10;
-        }
-        return string(buffer);
     }
 }
