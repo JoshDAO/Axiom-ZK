@@ -6,6 +6,8 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {BokkyPooBahsDateTimeLibrary} from "./library/BokkyPooBahsDateTimeLibrary.sol";
 import {Strings} from "./library/Strings.sol";
 
+import "hardhat/console.sol";
+
 /**
  * SPDX-License-Identifier: UNLICENSED
  * @title A contract to allow sellers to mint and sell binary options
@@ -29,8 +31,11 @@ contract Marketplace {
     /// @dev mapping from seller address to list of all oToken contracts it has deployed that have not all been closed
     mapping(address => EnumerableSet.AddressSet) private otokensBySeller;
 
+    // @dev mapping of buyer address to list of all oToken contracts it has bought that have not been closed
+    mapping(address => EnumerableSet.AddressSet) private otokensByBuyer;
+
     /// @dev mapping from oTokenAddress to sale info
-    mapping(address => OptionSaleInfo) private optionSaleInfo;
+    mapping(address => OptionSaleInfo) public optionSaleInfo;
 
     // @dev mapping from token ID to address
     mapping(bytes32 => address) public idToAddress;
@@ -85,7 +90,6 @@ contract Marketplace {
             _isPut,
             msg.sender
         );
-        require(_price > 0 && _price < 1e18, "invalid price");
 
         // this value will be the zero address if does not exist
         oTokenAddress = idToAddress[tokenId];
@@ -107,6 +111,7 @@ contract Marketplace {
         optionSaleInfo[oTokenAddress].price = _price;
         optionSaleInfo[oTokenAddress].currentlyForSale = true;
         optionsForSale.add(oTokenAddress);
+        otokensBySeller[msg.sender].add(oTokenAddress);
     }
 
     function buyOption(address _oTokenAddress, address _seller) external {
@@ -134,6 +139,77 @@ contract Marketplace {
         optionSaleInfo[_oTokenAddress].price = 0;
         optionSaleInfo[_oTokenAddress].currentlyForSale = false;
         optionSaleInfo[_oTokenAddress].numberContractsMatched += 1;
+        otokensByBuyer[msg.sender].add(_oTokenAddress);
+    }
+
+    /**
+     * @notice allows a seller of an option that expired OTM to redeem their 1 WETH of collateral.
+     *         Checks option contracct is expired.
+     *         Checks if this seller has outstanding short contracts of this option series (strike, expiry, direction)
+     *         If so, send 1 WETH to the seller for each contract they have sold
+     * @param _strikePrice strike price with decimals = 6
+     * @param _expiry expiration timestamp as a unix timestamp
+     * @param _isPut True if a put option, False if a call option
+     */
+    function redeemCollateral(
+        uint256 _strikePrice,
+        uint256 _expiry,
+        bool _isPut
+    ) external {
+        require(_expiry < block.timestamp, "Option must be expired:");
+        address otokenAddress = getOtoken(
+            _strikePrice,
+            _expiry,
+            _isPut,
+            msg.sender
+        );
+        require(
+            otokensBySeller[msg.sender].contains(otokenAddress),
+            "user has not sold this option"
+        );
+        // TODO: check that the strike price was NOT touched at any point before releasing collateral back to seller
+
+        uint256 numberOfContracts = optionSaleInfo[otokenAddress]
+            .numberContractsMatched;
+
+        ERC20(weth).transfer(msg.sender, numberOfContracts * 1e18);
+
+        // remove this contract from storage since it is settled.
+        delete optionSaleInfo[otokenAddress];
+        otokensBySeller[msg.sender].remove(otokenAddress);
+    }
+
+    /**
+     * @notice allows a buyer of an option that expired ITM to redeem their 1 WETH payout.
+     *         Checks option contracct is expired.
+     *         Transfers the quantity of oTokens to this address to be burned
+     *         Checks price touched the strike price using ZK proofs
+     *         Sends the buyer 1 WETH for each contract they own
+     * @param _oTokenAddress address of the otoken contract to be redeemed
+     * @param _quantity number of contracts to be redeemed. e18
+     */
+    function redeemOption(address _oTokenAddress, uint256 _quantity) external {
+        uint expiry = Otoken(_oTokenAddress).expiryTimestamp();
+        require(expiry < block.timestamp, "Option must be expired");
+        require(_quantity % 1e18 == 0, "must be whole number of contracts");
+        address seller = Otoken(_oTokenAddress).seller();
+        uint256 strikePrice = Otoken(_oTokenAddress).strikePrice();
+
+        //TODO: check price touched strike price between issuance and expiry using zk proofs
+
+        // send otokens to burn address
+        ERC20(_oTokenAddress).transferFrom(msg.sender, address(0), _quantity);
+        ERC20(weth).transfer(msg.sender, _quantity);
+
+        optionSaleInfo[_oTokenAddress].numberContractsMatched -=
+            _quantity /
+            1e18;
+
+        if (optionSaleInfo[_oTokenAddress].numberContractsMatched == 0) {
+            // remove this contract from storage since all open contracts have been redeemed.
+            delete optionSaleInfo[_oTokenAddress];
+            otokensBySeller[msg.sender].remove(_oTokenAddress);
+        }
     }
 
     /**
@@ -210,6 +286,18 @@ contract Marketplace {
         return optionsForSale.values();
     }
 
+    function getOptionsForSaleBySeller(
+        address _seller
+    ) public view returns (address[] memory) {
+        return otokensBySeller[_seller].values();
+    }
+
+    function getOptionsBoughtByBuyer(
+        address _buyer
+    ) public view returns (address[] memory) {
+        return otokensByBuyer[_buyer].values();
+    }
+
     // ======== oToken functions =========
 
     /**
@@ -233,10 +321,10 @@ contract Marketplace {
             "OtokenFactory: Can't create option with expiry > 2345/12/31"
         );
         // 8 hours = 3600 * 8 = 28800 seconds
-        require(
-            (_expiry - 28800) % (86400) == 0,
-            "OtokenFactory: Option has to expire 08:00 UTC"
-        );
+        // require(
+        //     (_expiry - 28800) % (86400) == 0,
+        //     "OtokenFactory: Option has to expire 08:00 UTC"
+        // );
 
         (
             string memory tokenName,
@@ -398,6 +486,8 @@ contract Marketplace {
     ) internal pure returns (string memory) {
         uint256 remainder = _strikePrice % STRIKE_PRICE_SCALE;
         uint256 quotient = _strikePrice / STRIKE_PRICE_SCALE;
+        console.logUint(remainder);
+        console.logUint(quotient);
         string memory quotientStr = Strings.toString(quotient);
 
         if (remainder == 0) return quotientStr;

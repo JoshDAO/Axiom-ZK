@@ -4,25 +4,24 @@
 // You can also run a script with `npx hardhat run <script>`. If you do that, Hardhat
 // will compile your contracts, add the Hardhat Runtime Environment's members to the
 // global scope, and execute the script.
+// import hre from "hardhat";
 const hre = require("hardhat");
 
 async function main() {
-  const currentTimestampInSeconds = Math.round(Date.now() / 1000);
-  const unlockTime = currentTimestampInSeconds + 60;
+  const erc20 = await hre.ethers.getContractFactory("MyERC20");
 
-  const lockedAmount = hre.ethers.parseEther("0.001");
+  const weth = await erc20.deploy("WETH", "WETH");
+  await weth.waitForDeployment();
+  console.log("WETH deployed to:", await weth.getAddress());
 
-  const lock = await hre.ethers.deployContract("Lock", [unlockTime], {
-    value: lockedAmount,
-  });
-
-  await lock.waitForDeployment();
-
-  console.log(
-    `Lock with ${ethers.formatEther(
-      lockedAmount
-    )}ETH and unlock timestamp ${unlockTime} deployed to ${lock.target}`
-  );
+  const usdc = await erc20.deploy("USDC", "USDC");
+  await usdc.waitForDeployment();
+  console.log("USDC deployed to:", await usdc.getAddress());
+  
+  const marketplace = await hre.ethers.getContractFactory("Marketplace");
+  const market = await marketplace.deploy(await weth.getAddress(), await usdc.getAddress());
+  await market.waitForDeployment();
+  console.log("Marketplace deployed to:", await market.getAddress());
 }
 
 // We recommend this pattern to be able to use async/await everywhere
