@@ -175,13 +175,12 @@ contract Marketplace {
             msg.sender
         );
         require(
-            block.timestamp > _expiry + 604800,
-            "a week since expiry must have elapsed"
+            otokensBySeller[msg.sender].contains(otokenAddress),
+            "user has not sold this option"
         );
         // check that over 1 week has elapsed since expiration
         // this is in lieu of proving that the option did NOT expire itm since this is v hard with zk proofs
         // this gives buyers 1 week to redeem their payout after expiry, or they forfeit it.
-
         require(
             block.timestamp > _expiry + 604800,
             "a week since expiry must have elapsed"
