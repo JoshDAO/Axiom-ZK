@@ -10,7 +10,7 @@ import "hardhat/console.sol";
 
 /**
  * SPDX-License-Identifier: UNLICENSED
- * @title A contract to allow sellers to mint and sell binary options
+ * @title A contract to allow sellers to mint and sell binary barrier options
  * @notice Create new oTokens and keep track of all created tokens
  * @notice For simplicity, this contract only allows orders of size 1.
  * @notice This contract does not allow a seller to have multiple of the same option for sale simultaneously.
@@ -167,77 +167,14 @@ contract Marketplace {
             otokensBySeller[msg.sender].contains(otokenAddress),
             "user has not sold this option"
         );
-        // TODO: check that the strike price was NOT touched at any point before releasing collateral back to seller
+        // check that over 1 week has elapsed since expiration
+        // this is in lieu of proving that the option did NOT expire itm since this is v hard with zk proofs
+        // this gives buyers 1 week to redeem their payout after expiry, or they forfeit it.
 
-        uint256 numberOfContracts = optionSaleInfo[otokenAddress]
-            .numberContractsMatched;
-
-        ERC20(weth).transfer(msg.sender, numberOfContracts * 1e18);
-
-        // remove this contract from storage since it is settled.
-        delete optionSaleInfo[otokenAddress];
-        otokensBySeller[msg.sender].remove(otokenAddress);
-    }
-
-    /**
-     * @notice allows a buyer of an option that expired ITM to redeem their 1 WETH payout.
-     *         Checks option contracct is expired.
-     *         Transfers the quantity of oTokens to this address to be burned
-     *         Checks price touched the strike price using ZK proofs
-     *         Sends the buyer 1 WETH for each contract they own
-     * @param _oTokenAddress address of the otoken contract to be redeemed
-     * @param _quantity number of contracts to be redeemed. e18
-     */
-    function redeemOption(address _oTokenAddress, uint256 _quantity) external {
-        uint expiry = Otoken(_oTokenAddress).expiryTimestamp();
-        require(expiry < block.timestamp, "Option must be expired");
-        require(_quantity % 1e18 == 0, "must be whole number of contracts");
-        address seller = Otoken(_oTokenAddress).seller();
-        uint256 strikePrice = Otoken(_oTokenAddress).strikePrice();
-
-        //TODO: check price touched strike price between issuance and expiry using zk proofs
-
-        // send otokens to burn address
-        ERC20(_oTokenAddress).transferFrom(msg.sender, address(0), _quantity);
-        ERC20(weth).transfer(msg.sender, _quantity);
-
-        optionSaleInfo[_oTokenAddress].numberContractsMatched -=
-            _quantity /
-            1e18;
-
-        if (optionSaleInfo[_oTokenAddress].numberContractsMatched == 0) {
-            // remove this contract from storage since all open contracts have been redeemed.
-            delete optionSaleInfo[_oTokenAddress];
-            otokensBySeller[msg.sender].remove(_oTokenAddress);
-        }
-    }
-
-    /**
-     * @notice allows a seller of an option that expired OTM to redeem their 1 WETH of collateral.
-     *         Checks option contracct is expired.
-     *         Checks if this seller has outstanding short contracts of this option series (strike, expiry, direction)
-     *         If so, send 1 WETH to the seller for each contract they have sold
-     * @param _strikePrice strike price with decimals = 6
-     * @param _expiry expiration timestamp as a unix timestamp
-     * @param _isPut True if a put option, False if a call option
-     */
-    function redeemCollateral(
-        uint256 _strikePrice,
-        uint256 _expiry,
-        bool _isPut
-    ) external {
-        require(_expiry < block.timestamp, "Option must be expired:");
-        address otokenAddress = getOtoken(
-            _strikePrice,
-            _expiry,
-            _isPut,
-            msg.sender
-        );
         require(
-            otokensBySeller[msg.sender].contains(otokenAddress),
-            "user has not sold this option"
+            block.timestamp > _expiry + 604800,
+            "a week since expiry must have elapsed"
         );
-        // TODO: check that the strike price was NOT touched at any point before releasing collateral back to seller
 
         uint256 numberOfContracts = optionSaleInfo[otokenAddress]
             .numberContractsMatched;
@@ -296,6 +233,20 @@ contract Marketplace {
         address _buyer
     ) public view returns (address[] memory) {
         return otokensByBuyer[_buyer].values();
+    }
+
+    // ======== Axiom ZK Callback =========
+
+    function axiomV2Callback(
+        uint64 sourceChainId,
+        address callerAddr,
+        bytes32 querySchema,
+        uint256 queryId,
+        bytes32[] calldata axiomResults,
+        bytes calldata extraData
+    ) external {
+        // Handle callback data here
+        require(sourceChainId =)
     }
 
     // ======== oToken functions =========
