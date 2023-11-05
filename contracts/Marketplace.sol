@@ -25,6 +25,15 @@ contract Marketplace {
     /// @dev usdc contract address
     address usdc;
 
+    /// @dev axiomV2queryAddress contract address
+    address axiomV2QueryAddress;
+
+    /// @dev the chain id the contract is deployed on
+    uint256 chainId;
+
+    /// @dev Query schema outputted by the Axiom SDK
+    bytes32 callbackQuerySchema;
+
     /// @dev enumerable address set of all oToken addresses currently for sale
     EnumerableSet.AddressSet optionsForSale;
 
@@ -52,9 +61,18 @@ contract Marketplace {
         uint numberContractsMatched; // counts the cumulative number of contracts that have been sold
     }
 
-    constructor(address _weth, address _usdc) {
+    constructor(
+        address _weth,
+        address _usdc,
+        address _axiomV2QueryAddress,
+        bytes32 _callbackQuerySchema,
+        uint256 _chainId
+    ) {
         weth = _weth;
         usdc = _usdc;
+        axiomV2QueryAddress = _axiomV2QueryAddress;
+        callbackQuerySchema = _callbackQuerySchema;
+        chainId = _chainId;
     }
 
     /// @notice emitted when the factory creates a new Option
@@ -196,39 +214,6 @@ contract Marketplace {
         otokensBySeller[msg.sender].remove(otokenAddress);
     }
 
-    /**
-     * @notice allows a buyer of an option that expired ITM to redeem their 1 WETH payout.
-     *         Checks option contracct is expired.
-     *         Transfers the quantity of oTokens to this address to be burned
-     *         Checks price touched the strike price using ZK proofs
-     *         Sends the buyer 1 WETH for each contract they own
-     * @param _oTokenAddress address of the otoken contract to be redeemed
-     * @param _quantity number of contracts to be redeemed. e18
-     */
-    function redeemOption(address _oTokenAddress, uint256 _quantity) external {
-        uint expiry = Otoken(_oTokenAddress).expiryTimestamp();
-        require(expiry < block.timestamp, "Option must be expired");
-        require(_quantity % 1e18 == 0, "must be whole number of contracts");
-        address seller = Otoken(_oTokenAddress).seller();
-        uint256 strikePrice = Otoken(_oTokenAddress).strikePrice();
-
-        //TODO: check price touched strike price between issuance and expiry using zk proofs
-
-        // send otokens to burn address
-        ERC20(_oTokenAddress).transferFrom(msg.sender, address(0), _quantity);
-        ERC20(weth).transfer(msg.sender, _quantity);
-
-        optionSaleInfo[_oTokenAddress].numberContractsMatched -=
-            _quantity /
-            1e18;
-
-        if (optionSaleInfo[_oTokenAddress].numberContractsMatched == 0) {
-            // remove this contract from storage since all open contracts have been redeemed.
-            delete optionSaleInfo[_oTokenAddress];
-            otokensBySeller[msg.sender].remove(_oTokenAddress);
-        }
-    }
-
     function getOptionsForSale() public view returns (address[] memory) {
         return optionsForSale.values();
     }
@@ -247,6 +232,15 @@ contract Marketplace {
 
     // ======== Axiom ZK Callback =========
 
+    /**
+     * @notice Axoim ZK callback that will handle the redemption of an ITM option
+     *         allows a buyer of an option that expired ITM to redeem their 1 WETH payout.
+     *         Checks callback params for validity
+     *         Checks option contract is expired.
+     *         Transfers the quantity of oTokens to this address to be burned
+     *         Checks price touched the strike price using ZK proofs
+     *         Sends the buyer 1 WETH for each contract they own
+     */
     function axiomV2Callback(
         uint64 sourceChainId,
         address callerAddr,
@@ -255,8 +249,63 @@ contract Marketplace {
         bytes32[] calldata axiomResults,
         bytes calldata extraData
     ) external {
-        // Handle callback data here
-        require(sourceChainId =)
+        require(msg.sender == axiomV2QueryAddress);
+        // ------begin proof public variable varification------
+        require(sourceChainId == chainId);
+        require(
+            querySchema == callbackQuerySchema,
+            "AxiomV2Client: query schema mismatch"
+        );
+        address oTokenAddress = address(uint160(uint256(axiomResults[4])));
+        // validate that block was before expiry
+        require(
+            uint256(axiomResults[1]) < Otoken(oTokenAddress).expiryTimestamp(),
+            "block timestamp is past expiry"
+        );
+        // validate that the block was after validfromTimestamp
+        require(
+            uint256(axiomResults[1]) >=
+                Otoken(oTokenAddress).validFromTimestamp(),
+            "block timestamp is before option valid from time"
+        );
+        // require that the proof is checking for price in the right direction
+        require(
+            abi.decode(abi.encodePacked(axiomResults[6]), (bool)) ==
+                Otoken(oTokenAddress).isPut(),
+            "price direction does not match"
+        );
+        // ------finish proof public variable varification------
+        require(
+            Otoken(oTokenAddress).expiryTimestamp() < block.timestamp,
+            "Option must be expired"
+        );
+        // check caller of the proof has an otoken balance
+        uint callerBalance = ERC20(oTokenAddress).balanceOf(callerAddr);
+        require(callerBalance % 1e18 == 0, "must be whole number of contracts");
+        require(callerBalance >= 1e18);
+        // require proof to be valid
+        require(abi.decode(abi.encodePacked(axiomResults[7]), (bool)) == true);
+
+        // send otokens to burn address
+        ERC20(oTokenAddress).transferFrom(
+            callerAddr,
+            address(0),
+            callerBalance
+        );
+        ERC20(weth).transfer(callerAddr, callerBalance);
+
+        optionSaleInfo[oTokenAddress].numberContractsMatched -=
+            callerBalance /
+            1e18;
+
+        if (optionSaleInfo[oTokenAddress].numberContractsMatched == 0) {
+            // remove this contract from storage since all open contracts have been redeemed.
+            delete optionSaleInfo[oTokenAddress];
+            otokensBySeller[Otoken(oTokenAddress).seller()].remove(
+                oTokenAddress
+            );
+        }
+        otokensByBuyer[callerAddr].remove(oTokenAddress);
     }
 
     // ======== oToken functions =========
@@ -283,10 +332,10 @@ contract Marketplace {
             "OtokenFactory: Can't create option with expiry > 2345/12/31"
         );
         // 8 hours = 3600 * 8 = 28800 seconds
-        // require(
-        //     (_expiry - 28800) % (86400) == 0,
-        //     "OtokenFactory: Option has to expire 08:00 UTC"
-        // );
+        require(
+            (_expiry - 28800) % (86400) == 0,
+            "OtokenFactory: Option has to expire 08:00 UTC"
+        );
 
         (
             string memory tokenName,
