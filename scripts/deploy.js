@@ -10,11 +10,11 @@ const hre = require("hardhat");
 async function main() {
   const erc20 = await hre.ethers.getContractFactory("MyERC20");
 
-  const weth = await erc20.deploy("WETH", "WETH");
+  const weth = await erc20.deploy("WETH", "WETH", 18);
   await weth.waitForDeployment();
   console.log("WETH deployed to:", await weth.getAddress());
 
-  const usdc = await erc20.deploy("USDC", "USDC");
+  const usdc = await erc20.deploy("USDC", "USDC", 6);
   await usdc.waitForDeployment();
   console.log("USDC deployed to:", await usdc.getAddress());
   

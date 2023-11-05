@@ -14,6 +14,9 @@ contract Otoken is ERC20 {
     /// @notice strike price with decimals = 6
     uint256 public strikePrice;
 
+    /// @notice start timestamp of the option, represented as a unix timestamp
+    uint256 public validFromTimestamp;
+
     /// @notice expiration timestamp of the option, represented as a unix timestamp
     uint256 public expiryTimestamp;
 
@@ -35,6 +38,7 @@ contract Otoken is ERC20 {
      */
     constructor(
         uint256 _strikePrice,
+        uint256 _validFrom,
         uint256 _expiryTimestamp,
         bool _isPut,
         address _seller,
@@ -43,6 +47,7 @@ contract Otoken is ERC20 {
         string memory tokenSymbol
     ) ERC20(tokenName, tokenSymbol) {
         strikePrice = _strikePrice;
+        validFromTimestamp = _validFrom;
         expiryTimestamp = _expiryTimestamp;
         isPut = _isPut;
         seller = _seller;
@@ -52,9 +57,15 @@ contract Otoken is ERC20 {
     function getOtokenDetails()
         external
         view
-        returns (uint256, uint256, bool, address)
+        returns (uint256, uint256, uint256, bool, address)
     {
-        return (strikePrice, expiryTimestamp, isPut, seller);
+        return (
+            strikePrice,
+            validFromTimestamp,
+            expiryTimestamp,
+            isPut,
+            seller
+        );
     }
 
     /**

@@ -46,6 +46,7 @@ contract Marketplace {
     uint256 private constant STRIKE_PRICE_DIGITS = 6;
 
     struct OptionSaleInfo {
+        address seller;
         bool currentlyForSale; // true if there is an unmatched sale order
         uint price; // denominated in WETH between 0 and 1e18
         uint numberContractsMatched; // counts the cumulative number of contracts that have been sold
@@ -80,12 +81,14 @@ contract Marketplace {
      */
     function sellOption(
         uint256 _strikePrice,
+        uint256 _validFrom,
         uint256 _expiry,
         bool _isPut,
         uint256 _price
     ) external returns (address oTokenAddress) {
         bytes32 tokenId = _getOptionId(
             _strikePrice,
+            _validFrom,
             _expiry,
             _isPut,
             msg.sender
@@ -96,7 +99,12 @@ contract Marketplace {
 
         if (oTokenAddress == address(0)) {
             // in this case we need to deploy an oToken contract
-            oTokenAddress = _createOtoken(_strikePrice, _expiry, _isPut);
+            oTokenAddress = _createOtoken(
+                _strikePrice,
+                _validFrom,
+                _expiry,
+                _isPut
+            );
         }
         if (ERC20(oTokenAddress).balanceOf(address(this)) == 1e18) {
             // if this contract already holds a token of this address, the seller already has one for sale, so simply reprice the token
@@ -110,6 +118,7 @@ contract Marketplace {
         Otoken(oTokenAddress).mintOtoken(address(this), 1e18);
         optionSaleInfo[oTokenAddress].price = _price;
         optionSaleInfo[oTokenAddress].currentlyForSale = true;
+        optionSaleInfo[oTokenAddress].seller = msg.sender;
         optionsForSale.add(oTokenAddress);
         otokensBySeller[msg.sender].add(oTokenAddress);
     }
@@ -153,12 +162,14 @@ contract Marketplace {
      */
     function redeemCollateral(
         uint256 _strikePrice,
+        uint256 _validFrom,
         uint256 _expiry,
         bool _isPut
     ) external {
         require(_expiry < block.timestamp, "Option must be expired:");
         address otokenAddress = getOtoken(
             _strikePrice,
+            _validFrom,
             _expiry,
             _isPut,
             msg.sender
@@ -170,7 +181,6 @@ contract Marketplace {
         // check that over 1 week has elapsed since expiration
         // this is in lieu of proving that the option did NOT expire itm since this is v hard with zk proofs
         // this gives buyers 1 week to redeem their payout after expiry, or they forfeit it.
-
         require(
             block.timestamp > _expiry + 604800,
             "a week since expiry must have elapsed"
@@ -260,6 +270,7 @@ contract Marketplace {
      */
     function _createOtoken(
         uint256 _strikePrice,
+        uint256 _validFrom,
         uint256 _expiry,
         bool _isPut
     ) internal returns (address) {
@@ -284,6 +295,7 @@ contract Marketplace {
         address newOtoken = address(
             new Otoken(
                 _strikePrice,
+                _validFrom,
                 _expiry,
                 _isPut,
                 msg.sender,
@@ -294,6 +306,7 @@ contract Marketplace {
         );
         bytes32 tokenId = _getOptionId(
             _strikePrice,
+            _validFrom,
             _expiry,
             _isPut,
             msg.sender
@@ -333,11 +346,18 @@ contract Marketplace {
      */
     function getOtoken(
         uint256 _strikePrice,
+        uint256 _validFrom,
         uint256 _expiry,
         bool _isPut,
         address _seller
     ) public view returns (address) {
-        bytes32 id = _getOptionId(_strikePrice, _expiry, _isPut, _seller);
+        bytes32 id = _getOptionId(
+            _strikePrice,
+            _validFrom,
+            _expiry,
+            _isPut,
+            _seller
+        );
         return idToAddress[id];
     }
 
@@ -351,12 +371,21 @@ contract Marketplace {
      */
     function _getOptionId(
         uint256 _strikePrice,
+        uint256 _validFrom,
         uint256 _expiry,
         bool _isPut,
         address _seller
     ) internal pure returns (bytes32) {
         return
-            keccak256(abi.encodePacked(_strikePrice, _expiry, _isPut, _seller));
+            keccak256(
+                abi.encodePacked(
+                    _strikePrice,
+                    _validFrom,
+                    _expiry,
+                    _isPut,
+                    _seller
+                )
+            );
     }
 
     // ======== oToken naming functions =========
